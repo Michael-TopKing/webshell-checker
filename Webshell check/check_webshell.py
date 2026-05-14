@@ -2,19 +2,40 @@
 import argparse
 import logging
 import time
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Dict, Tuple
+from urllib.parse import urljoin, urlparse
 
 import requests
 from tqdm import tqdm
+from bs4 import BeautifulSoup
 
+# ====================== 配置 ======================
+WEBSHELL_KEYWORDS = [
+    # 常見 Webshell 名稱/特徵
+    "wso", "filesman", "b374k", "c99", "r57", "sym", "shell", "cmd", "exec", 
+    "passthru", "system", "eval", "base64_decode", "gzinflate",
+    "upload files", "file manager", "command", "terminal", "backdoor",
+    "webshell", "hack", "anonymous", "madspot", "priv8", "indoxploit",
+    # 常見介面文字
+    "execute command", "upload file", "select file", "server info",
+    "php version", "uname -a", "directory", "permission"
+]
+
+RISK_SCORES = {
+    "wso": 50, "filesman": 45, "b374k": 50, "c99": 40, "r57": 40,
+    "upload files": 25, "file manager": 20, "execute command": 30,
+    "cmd=": 15, "system(": 10, "eval(": 15, "base64_decode": 12,
+}
 
 class WebshellChecker:
     def __init__(self, args):
         self.args = args
         self.setup_logging()
         self.session = self.create_session()
+        self.found = []
 
     def setup_logging(self):
         logging.basicConfig(
@@ -37,100 +58,148 @@ class WebshellChecker:
             session.proxies = {'http': self.args.proxy, 'https': self.args.proxy}
         return session
 
+    def normalize_url(self, base_url: str, path: str) -> str:
+        if not base_url.endswith('/'):
+            base_url += '/'
+        full_url = urljoin(base_url, path.lstrip('/'))
+        # 去除重複斜線
+        parsed = urlparse(full_url)
+        cleaned = parsed._replace(path = '/'.join(filter(None, parsed.path.split('/'))))
+        return cleaned.geturl()
+
     def load_file(self, filepath: str) -> List[str]:
         path = Path(filepath)
         if not path.exists():
-            self.logger.error(f"File not found: {filepath}")
             raise FileNotFoundError(f"File not found: {filepath}")
-        
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             return [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
-    def generate_urls(self, directories: List[str], filenames: List[str]) -> List[str]:
-        urls = []
-        for dir_path in directories:
-            # 確保目錄以 / 結尾
-            if not dir_path.endswith('/'):
-                dir_path += '/'
-            for filename in filenames:
-                urls.append(dir_path + filename)
-        return urls
+    def calculate_score(self, text: str, title: str = "") -> Tuple[int, List[str]]:
+        text_lower = text.lower()
+        title_lower = title.lower() if title else ""
+        matched = []
+        score = 0
 
-    def check_url(self, url: str) -> Tuple[str, bool, int, int]:
+        # Title 檢測
+        for kw in ["wso", "shell", "b374k", "c99", "r57"]:
+            if kw in title_lower:
+                score += 35
+                matched.append(f"Title:{kw}")
+
+        # 關鍵字檢測
+        for kw in WEBSHELL_KEYWORDS:
+            if kw.lower() in text_lower:
+                score += RISK_SCORES.get(kw.lower(), 15)
+                matched.append(kw)
+
+        # 常見 Webshell 結構特徵
+        if "<textarea" in text_lower:
+            score += 12
+            matched.append("textarea")
+        if "password" in text_lower and "type=" in text_lower:
+            score += 8
+            matched.append("login_form")
+
+        return min(score, 100), matched
+
+    def check_url(self, base_url: str, filename: str) -> Dict:
+        url = self.normalize_url(base_url, filename)
+        
         try:
-            # 先用 HEAD 快速檢查，失敗再 GET
-            response = self.session.head(url, timeout=self.args.timeout, allow_redirects=self.args.allow_redirect)
+            # 第一步：HEAD 快速過濾
+            head_resp = self.session.head(url, timeout=self.args.timeout, allow_redirects=self.args.allow_redirect)
             
-            if response.status_code == 405:  # Method Not Allowed
-                response = self.session.get(url, timeout=self.args.timeout, allow_redirects=self.args.allow_redirect)
+            if head_resp.status_code not in [200, 403, 500]:
+                return {"url": url, "found": False, "score": 0}
 
-            size = len(response.content) if hasattr(response, 'content') else 0
+            # 第二步：GET 獲取內容
+            resp = self.session.get(url, timeout=self.args.timeout, allow_redirects=self.args.allow_redirect)
             
-            # 簡單內容過濾（避免假陽性）
-            is_webshell = (
-                response.status_code == 200 and
-                size > 100  # 避免空頁面或錯誤頁
-            )
-            
-            if is_webshell:
-                self.logger.info(f"✅ Found: {url} | Code: {response.status_code} | Size: {size}")
-            
-            return url, is_webshell, response.status_code, size
+            if resp.status_code != 200:
+                return {"url": url, "found": False, "score": 0}
 
-        except requests.exceptions.RequestException as e:
-            self.logger.debug(f"Error checking {url}: {e}")
-            return url, False, 0, 0
+            content = resp.text
+            size = len(resp.content)
+
+            # 解析 Title
+            soup = BeautifulSoup(content, 'html.parser')
+            title = soup.title.string.strip() if soup.title and soup.title.string else ""
+
+            score, matched = self.calculate_score(content, title)
+
+            result = {
+                "url": url,
+                "found": score >= self.args.min_score,
+                "score": score,
+                "status": resp.status_code,
+                "size": size,
+                "title": title[:100],
+                "matched": matched[:10]  # 最多記錄10個
+            }
+
+            if result["found"]:
+                self.logger.info(f"🚨 WEBSHELL FOUND! Score: {score} | {url}")
+                print(f"\033[1;32m[+] WEBSHELL [{score}] → {url}\033[0m")
+
+            return result
+
+        except requests.exceptions.RequestException:
+            return {"url": url, "found": False, "score": 0}
         except Exception as e:
-            self.logger.warning(f"Unexpected error with {url}: {e}")
-            return url, False, 0, 0
+            self.logger.debug(f"Error {url}: {e}")
+            return {"url": url, "found": False, "score": 0}
 
     def run(self):
-        self.logger.info("=== Webshell Checker Started ===")
+        self.logger.info("=== Advanced Webshell Detection Started ===")
         
         directories = self.load_file(self.args.directories)
         filenames = self.load_file(self.args.dictionary)
-        
-        self.logger.info(f"Loaded {len(directories)} directories and {len(filenames)} filenames")
-        
-        urls = self.generate_urls(directories, filenames)
-        self.logger.info(f"Total URLs to check: {len(urls):,}")
-        
-        found = []
+
+        self.logger.info(f"Directories: {len(directories)} | Filenames: {len(filenames)}")
+
+        # 生成唯一 URL
+        tasks = []
+        seen = set()
+        for d in directories:
+            for f in filenames:
+                url = self.normalize_url(d, f)
+                if url not in seen:
+                    seen.add(url)
+                    tasks.append((d, f))
+
+        self.logger.info(f"Total unique URLs to check: {len(tasks):,}")
+
         start_time = time.time()
 
         with ThreadPoolExecutor(max_workers=self.args.threads) as executor:
-            future_to_url = {executor.submit(self.check_url, url): url for url in urls}
+            future_to_task = {executor.submit(self.check_url, d, f): (d, f) for d, f in tasks}
             
-            for future in tqdm(as_completed(future_to_url), total=len(urls), desc="Scanning"):
-                url, is_found, status, size = future.result()
-                if is_found:
-                    found.append(url)
+            for future in tqdm(as_completed(future_to_task), total=len(tasks), desc="Webshell Detection"):
+                result = future.result()
+                if result["found"]:
+                    self.found.append(result)
 
         # 輸出結果
         output_path = Path(self.args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
         with open(output_path, 'w', encoding='utf-8') as f:
-            for url in found:
-                f.write(url + '\n')
+            for item in self.found:
+                f.write(f"{item['url']}|score={item['score']}|title={item.get('title','')}\n")
 
         elapsed = time.time() - start_time
-        self.logger.info(f"=== Scan Completed in {elapsed:.1f} seconds ===")
-        self.logger.info(f"Found {len(found)} webshell(s) → {output_path}")
+        self.logger.info(f"Scan completed in {elapsed:.1f}s | Found {len(self.found)} Webshell(s)")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Webshell Checker - Directory + Filename Brute Forcer")
-    parser.add_argument('--directories', '-d', required=True, help='Directory list file (from Script 1)')
+    parser = argparse.ArgumentParser(description="Advanced Webshell Detection Framework")
+    parser.add_argument('--directories', '-d', required=True, help='Directory list file')
     parser.add_argument('--dictionary', '-w', required=True, help='Webshell filename dictionary')
-    parser.add_argument('--output', '-o', default='found_webshells.txt', help='Output file')
-    parser.add_argument('--threads', '-t', type=int, default=20, help='Number of threads (default: 20)')
-    parser.add_argument('--timeout', type=int, default=10, help='Request timeout in seconds')
-    parser.add_argument('--user-agent', default='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 
-                        help='Custom User-Agent')
-    parser.add_argument('--proxy', help='Proxy (e.g. http://127.0.0.1:8080)')
-    parser.add_argument('--delay', type=float, default=0, help='Delay between requests (seconds)')
-    parser.add_argument('--allow-redirect', action='store_true', help='Allow HTTP redirects')
+    parser.add_argument('--output', '-o', default='found_webshells.txt')
+    parser.add_argument('--threads', '-t', type=int, default=25)
+    parser.add_argument('--timeout', type=int, default=10)
+    parser.add_argument('--min-score', type=int, default=45, help='Minimum risk score to report (default:45)')
+    parser.add_argument('--user-agent', default='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+    parser.add_argument('--proxy')
+    parser.add_argument('--allow-redirect', action='store_true')
 
     args = parser.parse_args()
     
