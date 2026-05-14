@@ -17,3 +17,11 @@
 - URL 去重 + 標準化
 - 大幅降低誤報
 - 詳細 logging 和彩色輸出
+
+## 📥 安裝方式
+
+### 1. 下載程式
+
+```bash
+git clone https://github.com/Michael-TopKing/webshell-checker.git
+cd webshell-checker
