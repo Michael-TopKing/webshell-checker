@@ -25,3 +25,13 @@
 ```bash
 git clone https://github.com/Michael-TopKing/webshell-checker.git
 cd webshell-checker
+pip install -r requirements.txt
+```
+
+### 2. 使用方式
+```bash
+python check_webshell.py \
+  --directories web_directories.txt \
+  --dictionary webshell_dict.txt \
+  --output found_webshells.txt \
+  --threads 50
