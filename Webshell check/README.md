@@ -37,7 +37,6 @@ GET 请求获取页面内容
 写入输出文件
 ```
 
----
 
 ## 🔍 关键逻辑流程：
 
@@ -47,7 +46,6 @@ GET 请求获取页面内容
 urljoin(base, filename)
 ```
 
----
 
 ### Step 2：HEAD 预过滤
 
@@ -61,7 +59,6 @@ if status not in [200, 403, 500]:
 * 减少无效 GET
 * 快速过滤死路径
 
----
 
 ### Step 3：GET 请求分析
 
@@ -75,7 +72,6 @@ if resp.status_code != 200:
 ✔ 只分析 200 页面
 ❌ 403/500 不做内容分析
 
----
 
 ### Step 4：内容分析
 
@@ -95,11 +91,9 @@ score >= min_score
 
 → 写入文件 + 打印警告
 
----
 
 # 3. 关键模块解析
 
----
 
 # 🧩 3.1 扫描模块（Thread Pool）
 
@@ -113,8 +107,6 @@ ThreadPoolExecutor(max_workers=threads)
 * 适合 requests blocking IO
 * 简单稳定
 
----
-
 # 🧩 3.2 请求模块（requests.Session）
 
 ```python id="t2"
@@ -127,7 +119,6 @@ requests.Session()
 * 可配置 proxy
 * User-Agent 统一管理
 
----
 
 # 🧩 3.3 URL标准化模块
 
@@ -145,11 +136,8 @@ urljoin + urlparse clean path
 
 变成混乱路径
 
----
-
 # 🧩 3.4 评分引擎（核心）
 
----
 
 ## 📊 scoring 逻辑：
 
@@ -159,7 +147,6 @@ urljoin + urlparse clean path
 wso / b374k / shell → +35
 ```
 
----
 
 ### ② Keyword 权重
 
@@ -177,7 +164,6 @@ WEBSHELL_KEYWORDS
 * cmd
 * file manager
 
----
 
 ### ③ 固定风险分
 
@@ -187,7 +173,6 @@ eval( → +15
 base64_decode → +12
 ```
 
----
 
 ### ④ UI结构特征
 
@@ -196,8 +181,6 @@ base64_decode → +12
 password form → +8
 ```
 
----
-
 ## 📌 最终公式：
 
 ```text id="s5"
@@ -205,7 +188,6 @@ score = keyword + title + UI + structure
 max = 100
 ```
 
----
 
 # 🧩 3.5 HEAD + GET 双阶段过滤
 
@@ -221,8 +203,6 @@ max = 100
 
 > “fast reject + deep analysis” 模型
 
----
-
 # 🧩 3.6 并发模块
 
 ```python id="p1"
@@ -235,7 +215,6 @@ ThreadPoolExecutor(max_workers=25)
 * 不像 asyncio 那样极限压测
 * 更适合稳定扫描
 
----
 
 # 4. 命令行参数说明
 
@@ -250,11 +229,9 @@ ThreadPoolExecutor(max_workers=25)
 | `--proxy`          | HTTP代理    |
 | `--allow-redirect` | 是否允许跳转    |
 
----
 
 # 5. 输入 / 输出示例
 
----
 
 ## 📥 输入：
 
@@ -266,7 +243,6 @@ ThreadPoolExecutor(max_workers=25)
 /shell/
 ```
 
----
 
 ### dictionary.txt
 
@@ -276,7 +252,6 @@ shell.php
 upload.php
 ```
 
----
 
 ## 🌐 实际扫描URL：
 
@@ -286,7 +261,6 @@ upload.php
 /shell/upload.php
 ```
 
----
 
 ## 📤 输出：
 
@@ -294,11 +268,8 @@ upload.php
 http://target.com/admin/shell.php|score=78|title=WSO Shell Panel
 ```
 
----
-
 # 6. 并发与性能机制
 
----
 
 ## 🧵 线程模型
 
@@ -308,7 +279,6 @@ ThreadPoolExecutor
 → blocking requests IO
 ```
 
----
 
 ## ⚡ 性能特点
 
@@ -318,7 +288,6 @@ ThreadPoolExecutor
 * CPU 占用低
 * 适合中小规模扫描
 
----
 
 ❌ 缺点：
 
@@ -327,11 +296,8 @@ ThreadPoolExecutor
 * 无自适应控制
 * requests 阻塞 IO
 
----
-
 # 7. 风险提示（安全研究重点）
 
----
 
 ## ⚠️ 7.1 误报风险（False Positive）
 
@@ -342,7 +308,6 @@ ThreadPoolExecutor
 * debug 工具页面
 * admin panel
 
----
 
 ## ⚠️ 7.2 漏报风险（False Negative）
 
@@ -351,7 +316,6 @@ ThreadPoolExecutor
 * 非 PHP 后门（JSP/ASP）
 * 伪装成 404 shell
 
----
 
 ## ⚠️ 7.3 滥用风险
 
@@ -363,7 +327,6 @@ ThreadPoolExecutor
 
 👉 在很多国家属于**高风险安全工具**
 
----
 
 ## ⚠️ 7.4 技术风险
 
@@ -372,21 +335,17 @@ ThreadPoolExecutor
 * 无 WAF 自适应
 * 无 async 优化
 
----
-
 # 8. 如何部署和使用
 
----
 
 ## 8.1 安装依赖
 
 ```bash id="d1"
-git clone https://github.com/Michael-TopKing/Webshell-Checker-V2.git
-cd Webshell-Checker-V2
+git clone https://github.com/Michael-TopKing/webshell-checker.git
+cd Webshell check
 pip3 install -r requirements.txt
 ```
 
----
 
 ## 8.2 准备文件
 
@@ -402,7 +361,6 @@ directories.txt
 shell-dict.txt
 ```
 
----
 
 ## 8.3 运行
 
@@ -414,7 +372,6 @@ python3 webshell_checker.py \
   -o result.txt
 ```
 
----
 
 ## 8.4 输出查看
 
@@ -422,7 +379,6 @@ python3 webshell_checker.py \
 cat result.txt
 ```
 
----
 
 ## 8.5 日志文件
 
@@ -435,40 +391,3 @@ webshell_checker.log
 * 扫描进度
 * 命中结果
 * 错误请求
-
----
-
-# 🧠 最终总结（一句话）
-
-👉 这个工具是一个：
-
-> **基于 requests + 多线程 + 关键词评分系统的 Webshell 批量检测器**
-
----
-
-# 🔥 和你上一个 asyncio 版本对比（重点）
-
-| 项目  | Thread版 | asyncio版 |
-| --- | ------- | -------- |
-| 并发  | 中等      | 极高       |
-| 复杂度 | 简单      | 高        |
-| 速度  | 中       | 非常高      |
-| 稳定性 | 高       | 中        |
-| 功能  | 基础评分    | 自适应+高级过滤 |
-
----
-
-# 如果你下一步想升级（很关键）
-
-我可以帮你做：
-
-### 🚀 企业级 Webshell Scanner v3（推荐）
-
-* ✔ asyncio + thread hybrid
-* ✔ WAF fingerprint bypass
-* ✔ 403 body analysis
-* ✔ ML scoring（误报降低）
-* ✔ Redis queue 分布式扫描
-* ✔ dashboard UI
-
-只要说一句：**“升级架构版”** 👍
