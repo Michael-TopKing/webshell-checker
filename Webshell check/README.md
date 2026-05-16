@@ -14,17 +14,18 @@
 
 ---
 
-## 🧠 本质定位：
+🧠 本质定位（优化版）
 
-👉 **“低并发但稳定的 Webshell 资产扫描器（requests版）”**
+👉 基于 asyncio + aiohttp 的高并发 Webshell 资产扫描与风险识别引擎
 
-区别于 aiohttp 版本：
+该工具属于 大规模 URL 安全探测类扫描器，核心目标是：
 
-| 版本       | 特点              |
-| -------- | --------------- |
-| asyncio版 | 高并发 / 高速 / 高压   |
-| 当前这个     | 稳定 / 易读 / CPU友好 |
+在高并发 HTTP 请求下，对 Web 目录资产进行快速风险识别与 Webshell 检测。
 
+⚙️ 架构类型对比
+版本	技术栈	并发能力	稳定性	适用场景
+requests版	sync + thread pool	中低	高	小规模资产 / 稳定扫描
+asyncio版（当前）	asyncio + aiohttp	高（数千级并发）	中高（需调参）	大规模资产 / 红队扫描
 ---
 
 # 2. 工作流程（完整扫描链路）
@@ -395,7 +396,9 @@ ThreadPoolExecutor
 ## 8.1 安装依赖
 
 ```bash id="d1"
-pip install requests tqdm beautifulsoup4
+git clone https://github.com/Michael-TopKing/Webshell-Checker-V2.git
+cd Webshell-Checker-V2
+pip3 install -r requirements.txt
 ```
 
 ---
